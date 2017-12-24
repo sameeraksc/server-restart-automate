@@ -1,0 +1,173 @@
+#!/bin/bash
+
+#SCRIPT BY KANISHKA
+#NOTE-chnage permission 777 log.txt
+{
+echo "Sri lankan shedule restart started at $(date)"  > /rezsystem/rezadmin/slh_daily_restart_log/log.txt
+
+#change user to rezuser
+
+su - rezuser<< 'EOF'
+
+        echo $(whoami)
+
+
+	if [ `pgrep java_n -c` -gt "0"  ]
+	then
+		cd /rezsystem/rezadmin
+		./jbstopnode_1                                       >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1
+	      	sleep 6
+	      	./jbstopnode_4   				     >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1
+	      	sleep 6
+    else
+		echo "WARNING!!! Nodes are not running"          
+		exit                                              
+	fi
+	
+EOF
+
+echo $(whoami)
+
+#ssh to the SLH database server
+	
+	if [ `pgrep java_n -c` -le "0" ]
+	then
+	
+	    echo "Jboss nodes sucessfully killed"
+		
+		ssh -T postgres@172.31.51.87   << 'EOF'
+
+		echo "SLH shedule DB restart start at $(date)"  
+	        echo $(whoami)	
+		#NOTE-change permission 777 abc.txt 
+		
+		cd /rezsystem/rezadmin
+		./pgstop_cps					   >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1 
+		sleep 6 
+		./pgstop_slh                                       >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1 
+		sleep 6
+		
+		if [ `pgrep postmaster |wc -l` -le "0" ]
+		then	
+		    	echo "All postgress Nodes sucessfully killed"
+
+		    	cd /rezsystem/rezadmin
+
+			echo "DB restart process  started!!!..."
+
+		    	./pgstart_cps                                    >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1
+		    	sleep 6
+		 	./pgstart_slh 				         >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1
+		   	sleep 6
+
+	
+			if [ `pgrep postmaster |wc -l` -gt "0" ]
+				then
+	 				echo "database restart process is sucessfully completed" 
+				
+				else
+					echo "WARNING!!! database restart process failed"
+					echo "WARNING!!! SLH database restart process failed - Manulay restart" | mail -s "WARNING!!! database restart process failed" ons@rezgateway.com
+				
+			fi
+		else 
+			echo "database is still running!!! so java nodes are starting...."
+			echo "SLH database is still running!!! so java nodes are starting.." | mail -s "WARNING!!! database is still running!!!" ons@rezgateway.com	
+		fi
+               		
+EOF
+		
+	else
+		echo "WARNING!!! java nodes are still running !!!  HINT- Java nodes could  be started by another user"
+		exit
+	fi
+
+
+echo $(whoami)
+#restart memcached service
+
+SERVICE=memcached.service
+    
+	systemctl is-active memcached.service  > /dev/null 2>&1
+	if [ $? -eq 0 ]
+	then
+		echo "$SERVICE restarting..."
+		systemctl stop "$SERVICE"
+
+STATUS=`systemctl is-active $SERVICE`
+
+		if [ "$STATUS" == "inactive" ] 				
+			then
+				echo "$SERVICE is successfully stoped!! "
+				 systemctl start "$SERVICE"
+
+			else
+				echo "$SERVICE is still running!!!"
+		fi
+
+		systemctl is-active "$SERVICE"  > /dev/null 2>&1
+		if [ $? -eq 0 ]
+			then
+				echo "$SERVICE service restart process is sucessfully completed"
+			else
+				echo "$SERVICE service restart process failed "
+		fi
+	else
+		echo "WARNING!! $SERVICE is not running "
+  	fi 
+	
+		
+#restart java nodes ->  rezuser
+
+sleep 6 ;
+
+ su - rezuser<< 'EOF' 
+
+echo $(whoami)
+
+
+	if [ `pgrep java_n -c` -le "0"  ]
+	then
+                echo "Jboss Nodes are starting...."
+
+		cd /rezsystem/rezadmin
+		./jbstartnode_1                                       >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt
+		sleep 6 
+		./jbstartnode_4                                       >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt
+		sleep 6
+     
+         
+
+		if [ `pgrep java_n -c`  -eq "2" ]
+			then
+				echo $(whoami)
+				echo "==============================================================================="
+				echo "srilankanholidays shedule restart is sucessfully completed at $(date) "
+				echo "==============================================================================="
+				echo "srilankanholidays shedule restart is sucessfully completed at $(date)" | mail -s "COMPLETED!!! srilankanholidays shedule restart is sucessfully completed" ons@rezgateway.com     
+
+                               echo "" | mail -s "Daily Scheduled Restart at 02:30AM - SrilankanCPS and SLH" -c ons@rezgateway.com  SriLankanCPS@rezgateway.com < /rezsystem/rezadmin/slh_daily_restart_log/mail.txt
+
+
+			else
+				echo "==============================================================================="
+				echo "srilankanholidays shedule restart FAIELD -> check jboss nodes |MANUALY RESTART|"
+				echo "==============================================================================="
+			        echo "srilankanholidays shedule restart FAIELD  at $(date) check jboss nodes |MANUALY RESTART|" | mail -s "WARNING!!! srilankanholidays shedule restart FAILED" ons@rezgateway.com 	
+		fi
+    else
+		echo "WARNING!!! joss nodes still running"           
+		                                              
+	fi
+	
+EOF
+
+} >>/rezsystem/rezadmin/slh_daily_restart_log/log.txt 2>&1
+
+#log file backup
+cd /rezsystem/rezadmin/slh_daily_restart_log
+
+tar -czf  $( date '+%y-%m-%d' ).tar.gz  log.txt
+#echo "" >  /rezsystem/rezadmin/slh_daily_restart_log/log.txt
+  
+exit
